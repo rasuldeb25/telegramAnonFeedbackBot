@@ -6,8 +6,8 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command, CommandStart, CommandObject
 
 # --- CONFIGURATION ---
-API_TOKEN = '8562086473:AAFcNqQBtz8NcQOQBWZlDc81-xo0YDprvBo'
-ADMIN_LIST = [1545490936]  # Your ID
+API_TOKEN = ''
+ADMIN_LIST = []  # Your ID
 
 # --- SETUP ---
 bot = Bot(token=API_TOKEN)

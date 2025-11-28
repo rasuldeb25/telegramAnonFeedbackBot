@@ -4,16 +4,19 @@ import sqlite3
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command, CommandStart, CommandObject
+import html
 
 # --- CONFIGURATION ---
 API_TOKEN = ''
-ADMIN_LIST = []  # Your ID
+ADMIN_LIST = []
 
 # --- SETUP ---
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 logging.basicConfig(level=logging.INFO)
 active_sessions = {}
+
+reply_map = {}
 
 # --- KEYBOARD SETUP ---
 main_menu = ReplyKeyboardMarkup(
@@ -23,6 +26,7 @@ main_menu = ReplyKeyboardMarkup(
     resize_keyboard=True,
     input_field_placeholder="Choose an option..."
 )
+
 
 # --- DATABASE ---
 def init_db():
@@ -38,12 +42,14 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 def add_user(user_id):
     conn = sqlite3.connect('bot_database.db')
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
     conn.commit()
     conn.close()
+
 
 def get_all_users():
     conn = sqlite3.connect('bot_database.db')
@@ -52,7 +58,10 @@ def get_all_users():
     users = [row[0] for row in c.fetchall()]
     conn.close()
     return users
+
+
 init_db()
+
 
 # --- 1. START ---
 @dp.message(CommandStart())
@@ -74,6 +83,7 @@ async def start_handler(message: Message, command: CommandObject):
             reply_markup=main_menu
         )
 
+
 # --- 2. BUTTONS ---
 @dp.message(F.text == "🔗 Get My Link")
 async def button_get_link(message: Message):
@@ -81,9 +91,11 @@ async def button_get_link(message: Message):
     my_link = f"https://t.me/{bot_username}?start={message.from_user.id}"
     await message.answer(f"🔗 **Your Link:**\n`{my_link}`", parse_mode="Markdown")
 
+
 @dp.message(F.text == "❓ Help")
 async def button_help(message: Message):
     await message.answer("1. Share your link to get messages.\n2. Click a friend's link to send messages.")
+
 
 # --- 3. BROADCAST ---
 @dp.message(Command("broadcast"))
@@ -104,38 +116,59 @@ async def broadcast_handler(message: Message, command: CommandObject):
             pass
     await message.answer("✅ Done.")
 
-# --- 4. MESSAGES & REPLIES ---
+
+# --- 4. MESSAGES & REPLIES (The Invisible ID Version) ---
 @dp.message(F.text)
 async def handle_text(message: Message):
-    # Admin Reply Logic
+    # --- A. ADMIN REPLY LOGIC ---
+    # This runs when YOU reply to a forwarded message
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.id:
-        if "📩" in message.reply_to_message.text:
+
+        # Get the ID of the message you are replying to
+        replied_msg_id = message.reply_to_message.message_id
+
+        # Check our notebook: Who sent that message?
+        if replied_msg_id in reply_map:
+            target_user_id = reply_map[replied_msg_id]
+
             try:
-                lines = message.reply_to_message.text.splitlines()
-                user_line = next((line for line in lines if line.startswith("#id")), None)
-                if user_line:
-                    uid = int(user_line.replace("#id", ""))
-                    await bot.send_message(uid, f"🔔Reply: \n\n{message.text}")
-                    await message.answer("✅ Sent!")
-            except:
-                pass
+                await bot.send_message(target_user_id, f"🔔 **Reply:**\n\n{message.text}", parse_mode="Markdown")
+                await message.answer("✅ Reply sent!")
+            except Exception as e:
+                await message.answer(f"❌ Failed to send (User blocked bot?): {e}")
+        else:
+            await message.answer("❌ I forgot who sent this (Server restarted or old message).")
         return
 
-    # User Anon Message Logic
+    # --- B. USER ANON MESSAGE LOGIC ---
     sender_id = message.from_user.id
+
     if sender_id in active_sessions:
+        target_admin_id = active_sessions[sender_id]
         try:
-            await bot.send_message(active_sessions[sender_id], f"📩New Message\n\n{message.text}")
-            await message.answer("✅Sent!")
-        except:
-            await message.answer("❌User unavailable.")
+            # 1. Send the clean message (No ID visible!)
+            sent_message = await bot.send_message(
+                target_admin_id,
+                f"📩 **New Message**\n\n{message.text}",
+                parse_mode="Markdown"
+            )
+
+            # 2. Save the mapping in RAM
+            # "When Admin replies to this specific message ID, send to this Sender ID"
+            reply_map[sent_message.message_id] = sender_id
+
+            await message.answer("✅ Sent!")
+        except Exception as e:
+            await message.answer(f"❌ Error: {e}")
     else:
-        await message.answer("❓Click a link first.", reply_markup=main_menu)
+        await message.answer("❓ Click a link first.", reply_markup=main_menu)
+
 
 async def main():
     print("Bot is running...")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
